@@ -41,10 +41,12 @@ public class ECSClusterScaleIn implements Runnable {
     private final AmazonAutoScalingClient autoScalingClient;
     private final AmazonECSClient ecsClient;
     private final AmazonEC2Client ec2Client;
+    private final int instanceLifetimeInSeconds;
     
-    public ECSClusterScaleIn(final ECSService ecsService, final String ecsClusterArn, final String autoScalingGroupName) {
+    public ECSClusterScaleIn(final ECSService ecsService, final String ecsClusterArn, final String autoScalingGroupName, final int instanceLifetimeInSeconds) {
         this.ecsClusterArn = ecsClusterArn;
         this.autoScalingGroupName = autoScalingGroupName;
+	this.instanceLifetimeInSeconds = instanceLifetimeInSeconds;
 
         // init AWS clients
         this.autoScalingClient = ecsService.getAmazonAutoScalingClient();
@@ -68,10 +70,6 @@ public class ECSClusterScaleIn implements Runnable {
         autoScalingClient.setInstanceProtection(new SetInstanceProtectionRequest().withAutoScalingGroupName(autoScalingGroupName).withInstanceIds(instanceId).withProtectedFromScaleIn(protectFromScaleIn));
     }
 
-    // private void protect(final String instanceId) {
-    // protectFromScaleIn(instanceId, true);
-    // }
-
     private void unprotect(final String instanceId) {
         protectInstanceFromScaleIn(instanceId, false);
     }
@@ -80,16 +78,6 @@ public class ECSClusterScaleIn implements Runnable {
         unprotect(instanceId);
         autoScalingClient.terminateInstanceInAutoScalingGroup(new TerminateInstanceInAutoScalingGroupRequest().withInstanceId(instanceId).withShouldDecrementDesiredCapacity(true));
     }
-
-    // private void grow(final int amount) {
-    // final AutoScalingGroup autoScalingGroup = getAutoScalingGroup();
-    // final int newDesiredCapacity = autoScalingGroup.getDesiredCapacity() + amount;
-    // if (newDesiredCapacity <= autoScalingGroup.getMaxSize()) {
-    // autoScalingClient
-    // .setDesiredCapacity(new SetDesiredCapacityRequest().withAutoScalingGroupName(autoScalingGroupName)
-    // .withHonorCooldown(true).withDesiredCapacity(newDesiredCapacity));
-    // }
-    // }
 
     private List<String> getInstanceArns(final ContainerInstanceStatus status) {
         final List<String> instanceArns = new ArrayList<String>();
@@ -114,14 +102,6 @@ public class ECSClusterScaleIn implements Runnable {
         return Collections.emptyList();
     }
 
-    // private List<String> getInstanceIds(final ContainerInstanceStatus status) {
-    // final List<String> result = new ArrayList<String>();
-    // for (final ContainerInstance instance : describeInstances(status)) {
-    // result.add(instance.getEc2InstanceId());
-    // }
-    // return result;
-    // }
-
     public void drain(final String instanceArn) {
         ecsClient.updateContainerInstancesState(new UpdateContainerInstancesStateRequest().withCluster(ecsClusterArn).withStatus(ContainerInstanceStatus.DRAINING).withContainerInstances(instanceArn));
     }
@@ -138,6 +118,7 @@ public class ECSClusterScaleIn implements Runnable {
 
         // loop until interrupted
         try {
+            LOGGER.log(Level.INFO, "Checking auto scaling of ECS cluster {0} (using auto scaling group {1})", new Object[] {ecsClusterArn, autoScalingGroupName});
             while (!Thread.currentThread().isInterrupted()) {
                 // remove idle DRAINING jenkins slaves (=slaves put in DRAINING state in previous iteration of this loop)
                 for (final ContainerInstance containerInstance : describeInstances(ContainerInstanceStatus.DRAINING)) {
@@ -160,12 +141,12 @@ public class ECSClusterScaleIn implements Runnable {
                     final Date launchTime = instance.getLaunchTime();
                     final long upTimeInMilliSeconds = new Date().getTime() - launchTime.getTime();
                     final long upTimeInSeconds = upTimeInMilliSeconds / 1000;
-                    final long remainingSecondsUntilNextHour = 3600 - upTimeInSeconds % 3600;
-                    LOGGER.log(Level.FINE, "ECS cluster {0} instance {1} has uptime of {2} seconds - {3} seconds remaining until next billing hour", new Object[] {ecsClusterArn, instanceId, upTimeInSeconds, remainingSecondsUntilNextHour});
+                    final long remainingSecondsUntilNextHour = instanceLifetimeInSeconds - upTimeInSeconds % instanceLifetimeInSeconds;
+                    LOGGER.log(Level.INFO, "ECS cluster {0} instance {1} has uptime of {2} seconds - {3} seconds remaining until next billing hour", new Object[] {ecsClusterArn, instanceId, upTimeInSeconds, remainingSecondsUntilNextHour});
                     final String reasonToDrain;
                     if (upTimeInSeconds > 10 * 3600) {
                         reasonToDrain = "it's running for more than 10 hours";
-                    } else if (taskCount == 0 && remainingSecondsUntilNextHour < 240) {
+                    } else if (taskCount == 0 && remainingSecondsUntilNextHour < 90) {
                         reasonToDrain = "it's idle and close to the next billing hour";
                     } else {
                         reasonToDrain = null;

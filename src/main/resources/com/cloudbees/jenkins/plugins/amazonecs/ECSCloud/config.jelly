@@ -55,6 +55,9 @@
     <f:entry field="slaveTimoutInSeconds" title="${%ECS task creation timeout}" description="Timeout (in second) for ECS task to be created, usefull if you use large docker slave image, because the host will take more time to pull the docker image">
       <f:textbox />
     </f:entry>
+  <f:entry field="instanceLifetimeInSeconds" title="${%Instance lifetime in seconds}" >
+    <f:textbox />
+  </f:entry>
   </f:advanced>
 
   <f:entry title="${%ECS slave templates}">

@@ -85,6 +85,7 @@ public class ECSCloud extends Cloud {
     private static final Logger LOGGER = Logger.getLogger(ECSCloud.class.getName());
 
     private static final int DEFAULT_SLAVE_TIMEOUT = 900;
+    private static final int DEFAULT_INSTANCE_LIFETIME = 3600;
 
     /**
      * Start auto scaling ECS clusters as part of Jenkins initialization.
@@ -160,6 +161,8 @@ public class ECSCloud extends Cloud {
     @CheckForNull
     private String tunnel;
 
+    private int instanceLifetimeInSeconds;
+
     private String jenkinsUrl;
 
     private int slaveTimoutInSeconds;
@@ -168,7 +171,7 @@ public class ECSCloud extends Cloud {
 
     @DataBoundConstructor
     public ECSCloud(String name, List<ECSTaskTemplate> templates, @Nonnull String credentialsId,
-        String cluster, String autoScalingGroup, String regionName, String jenkinsUrl, int slaveTimoutInSeconds) throws InterruptedException {
+        String cluster, String autoScalingGroup, String regionName, String jenkinsUrl, int slaveTimoutInSeconds, int instanceLifetimeInSeconds) throws InterruptedException {
         super(name);
         this.credentialsId = credentialsId;
         this.cluster = cluster;
@@ -188,12 +191,18 @@ public class ECSCloud extends Cloud {
         } else {
             this.slaveTimoutInSeconds = DEFAULT_SLAVE_TIMEOUT;
         }
+
+        if (instanceLifetimeInSeconds > 0) {
+            this.instanceLifetimeInSeconds = instanceLifetimeInSeconds;
+        } else {
+            this.instanceLifetimeInSeconds = DEFAULT_INSTANCE_LIFETIME;
+        }
     }
 
     private void startAutoScaleIn() {
         if (!StringUtils.isEmpty(autoScalingGroup) && !StringUtils.isEmpty(cluster)) {
             if (clusterScalerThread == null) {
-                clusterScalerThread = new Thread(new ECSClusterScaleIn(getEcsService(), cluster, autoScalingGroup));
+                clusterScalerThread = new Thread(new ECSClusterScaleIn(getEcsService(), cluster, autoScalingGroup, getInstanceLifetimeInSeconds()));
                 clusterScalerThread.start();
             }
         }
@@ -238,9 +247,17 @@ public class ECSCloud extends Cloud {
         return tunnel;
     }
 
+    public int getInstanceLifetimeInSeconds() {
+        return instanceLifetimeInSeconds;
+    }
+
     @DataBoundSetter
     public void setTunnel(String tunnel) {
         this.tunnel = tunnel;
+    }
+
+    public void setInstanceLifetimeInSeconds(int instanceLifetimeInSeconds) {
+        this.instanceLifetimeInSeconds = instanceLifetimeInSeconds;
     }
 
     @CheckForNull
