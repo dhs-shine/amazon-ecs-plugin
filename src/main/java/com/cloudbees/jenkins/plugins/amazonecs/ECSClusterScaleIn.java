@@ -144,8 +144,10 @@ public class ECSClusterScaleIn implements Runnable {
                     final long remainingSecondsUntilNextHour = instanceLifetimeInSeconds - upTimeInSeconds % instanceLifetimeInSeconds;
                     LOGGER.log(Level.INFO, "ECS cluster {0} instance {1} has uptime of {2} seconds - {3} seconds remaining until next billing hour", new Object[] {ecsClusterArn, instanceId, upTimeInSeconds, remainingSecondsUntilNextHour});
                     final String reasonToDrain;
-                    if (upTimeInSeconds > 10 * 3600) {
-                        reasonToDrain = "it's running for more than 10 hours";
+                    final int numOfActiveInstance = describeInstances(ContainerInstanceStatus.ACTIVE).size();
+                    final int minSizeOfAutoScalingGroup = autoScalingGroup.getMinSize();
+                    if (numOfActiveInstance <= minSizeOfAutoScalingGroup) {
+                        reasonToDrain = null;
                     } else if (taskCount == 0 && remainingSecondsUntilNextHour < 90) {
                         reasonToDrain = "it's idle and close to the next billing hour";
                     } else {
