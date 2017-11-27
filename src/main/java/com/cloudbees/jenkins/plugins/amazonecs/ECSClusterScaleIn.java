@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Comparator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -30,6 +31,7 @@ import com.amazonaws.services.ecs.model.ListContainerInstancesRequest;
 import com.amazonaws.services.ecs.model.ListContainerInstancesResult;
 import com.amazonaws.services.ecs.model.UpdateContainerInstancesStateRequest;
 
+
 public class ECSClusterScaleIn implements Runnable {
 
     private static final Logger LOGGER = Logger.getLogger(ECSClusterScaleIn.class.getName());
@@ -43,6 +45,13 @@ public class ECSClusterScaleIn implements Runnable {
     private final AmazonEC2Client ec2Client;
     private final int instanceLifetimeInSeconds;
     
+    private class ComparatorContainerInstance implements Comparator<ContainerInstance> {
+        @Override
+        public int compare(ContainerInstance c1, ContainerInstance c2) {
+            return c1.getRegisteredAt().compareTo(c2.getRegisteredAt());
+            //return c1.getEc2InstanceId().compareTo(c2.getEc2InstanceId());
+        }
+    }
     public ECSClusterScaleIn(final ECSService ecsService, final String ecsClusterArn, final String autoScalingGroupName, final int instanceLifetimeInSeconds) {
         this.ecsClusterArn = ecsClusterArn;
         this.autoScalingGroupName = autoScalingGroupName;
@@ -108,6 +117,7 @@ public class ECSClusterScaleIn implements Runnable {
 
     @Override
     public void run() {
+
         final AutoScalingGroup autoScalingGroup = getAutoScalingGroup();
         LOGGER.log(Level.INFO, "Enabled auto scaling of ECS cluster {0} (using auto scaling group {1})", new Object[] {ecsClusterArn, autoScalingGroupName});
 
@@ -132,7 +142,9 @@ public class ECSClusterScaleIn implements Runnable {
 
                 // DRAIN idle jenkins slaves approaching the next billing hour
                 // (ECS will not start new tasks on a draining slave)
-                for (final ContainerInstance containerInstance : describeInstances(ContainerInstanceStatus.ACTIVE)) {
+                List<ContainerInstance> activeInstances = describeInstances(ContainerInstanceStatus.ACTIVE);
+                Collections.sort(activeInstances, new ComparatorContainerInstance());
+                for (final ContainerInstance containerInstance : activeInstances) {
                     final String instanceId = containerInstance.getEc2InstanceId();
                     final String instanceArn = containerInstance.getContainerInstanceArn();
                     final int taskCount = containerInstance.getPendingTasksCount() + containerInstance.getRunningTasksCount();
